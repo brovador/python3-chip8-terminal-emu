@@ -1,15 +1,21 @@
 import sys
+import os
 import time
 import random
+import keyboard
 
 class PyChip8:
     def __init__(self, debug = False):
         self.reset()
-        self.debug = debug
+        self.debug = debug        
 
     def __showDebugInfo(self):
         if not self.debug: return
-        print(f'\rPC: {self.pc}, T: {self.tdelay // 60}, V: {self.v}', end = '')
+        print(f'PC: {self.pc}, T: {self.tdelay // 60}, K: {[0 if k else 1 for k in self.key]}')
+
+    def __read_keyboard(self):
+        for i, k in enumerate(self.keymap):
+            self.key[i] = keyboard.is_pressed(k.lower())
 
     def reset(self):
         self.memory = bytearray(4 * 1024)
@@ -19,22 +25,92 @@ class PyChip8:
         self.tdelay = 0
         self.tsound = 0
         self.key = [0] * 16
-        self.gfx = [64 * 32]
+        self.screen_size = (64, 32)
+        self.gfx = [0] * self.screen_size[0] * self.screen_size[1]
         self.stack = [0] * 16
         self.sp = 0
+        self.keymap = [
+            'X', '1', '2', '3', 
+            'Q', 'W', 'E', 'A', 
+            'S', 'D', 'Z', 'C', 
+            '4', 'R', 'F', 'V'
+        ]
+        self.running = False
 
+    def __get_pixel_at(self, x, y):
+        w, _ = self.screen_size
+        return self.gfx[y * w + x]
+    
+    def __set_pixel_at(self, x, y, val):
+        w, _ = self.screen_size
+        self.gfx[y * w + x] = val
+
+    def __scroll_screen_down(self, n):
+        w, h = self.screen_size
+        for y in range(h, n, -1):
+            for x in range(w):
+                self.__set_pixel_at(x, y - 1, self.__get_pixel_at(x, y - n - 1))
+        for y in range(0, n):
+            for x in range(w):
+                self.__set_pixel_at(x, y, 0)
+    
+    def __scroll_screen_left(self, n):
+        w, h = self.screen_size
+        for y in range(h):
+            for x in range(0, w - n):
+                self.__set_pixel_at(x, y, self.__get_pixel_at(x + n, y))
+        for y in range(h):
+            for x in range(w - n, w):
+                self.__set_pixel_at(x, y, 0)
+
+    def __scroll_screen_right(self, n):
+        w, h = self.screen_size
+        for y in range(h):
+            for x in range(w, n, -1):
+                self.__set_pixel_at(x - 1, y, self.__get_pixel_at(x - n - 1, y))
+        for y in range(h):
+            for x in range(0, n):
+                self.__set_pixel_at(x, y, 0)
 
     def __decode_and_execute(self, opcode):
-        # ❌ 0E00 clear_screen
-        if opcode == 0x00E0: pass
-        
-        # 00EE subroutine return
-        elif opcode == 0x00EE:
-            self.pc = (self.memory[self.sp - 1] << 8) + self.memory[self.sp - 2]
-            self.sp -= 2
 
-        # ❌ 0NNN Calls machine code routine (RCA 1802 for COSMAC VIP) at address NNN. Not necessary for most ROMs. 
-        elif opcode < 0x1000: pass
+        if opcode < 0x1000:
+            # 00Cn - Scroll n pixels down
+            if opcode >= 0x00C0 and opcode < 0x00D0:
+                n = opcode & 0x000F
+                self.__scroll_screen_down(n)
+            
+            # 0E00 clear_screen
+            elif opcode == 0x00E0:
+                for i in range(len(self.gfx)):
+                    self.gfx[i] = 0
+            
+            # 00EE subroutine return
+            elif opcode == 0x00EE:
+                self.pc = (self.memory[self.sp - 1] << 8) + self.memory[self.sp - 2]
+                self.sp -= 2
+            
+            # 00FB - Scroll 4 pixels right
+            elif opcode == 0x00FB:
+                self.__scroll_screen_right(4)
+            
+            # 00FC - Scroll 4 pixels left
+            elif opcode == 0x00FC:
+                self.__scroll_screen_left(4)
+            
+            # 00FD - Exit
+            elif opcode == 0x00FD:
+                self.running = False
+
+            # ❌ 00FE - Disable extended mode
+            elif opcode == 0x00FE: pass
+            
+            # ❌ 00FF - Enable extended mode
+            elif opcode == 0x00FF: pass
+
+            else:
+                # ❌ 0NNN Calls machine code routine (RCA 1802 for COSMAC VIP) at address NNN. Not necessary for most ROMs.
+                pass
         
         # 1NNN jump to NNN
         elif opcode >= 0x1000 and opcode < 0x2000:
@@ -118,7 +194,6 @@ class PyChip8:
                 self.v[x] = self.v[x] << 1
             else:
                 decode_err = True
-
         
         # 9XY0 Skips the next instruction if VX doesn't equal VY. (Usually the next instruction is a jump to skip a code block) 
         elif opcode >= 0x9000 and opcode < 0xA000:
@@ -158,7 +233,7 @@ class PyChip8:
 
             else:
                 decode_err = True
-        
+
         # mix
         elif opcode >= 0xF000:
             op = opcode & 0x00FF
@@ -197,23 +272,25 @@ class PyChip8:
             
             else:
                 decode_err = True
+        
         else:
             decode_err = True
 
-        
         if decode_err:
             print(f'ERROR DECODING INSTRUCTION: {hex(opcode)}')
-        
-    
+            self.running = False
+         
     def __step(self):
-        decode_err = False
+
+        # update input
+        # self.__read_keyboard()
 
         # fetch opcode
-        opcode = self.memory[self.pc] << 8 | self.memory[self.pc + 1]
-        self.pc += 2
+        #opcode = self.memory[self.pc] << 8 | self.memory[self.pc + 1]
+        #self.pc += 2
 
         # decode opcode
-        self.__decode_and_execute(opcode)
+        #self.__decode_and_execute(opcode)
         
         # update timers
         if self.tdelay > 0: self.tdelay -= 1
@@ -223,21 +300,44 @@ class PyChip8:
                 pass
             self.tsound -= 1
     
+    def __draw_screen(self):
+        w, h = self.screen_size
+
+        lines = []
+        os.system('clear')
+        print('SCREEN:')
+        for y in range(h):
+            line = []
+            for x in range(w):
+                pixel = self.__get_pixel_at(x, y)
+                line.append('█' if pixel == 1 else '.')
+            lines.append(''.join(line))
+        print('\n'.join(lines))
+
 
     def run(self, rom_file):
         self.reset()
+        self.running = True
 
         # load rom_file contents
+        w, h = self.screen_size
+        for i in range(-2, 2):
+            for j in range(-2, 2):
+                self.__set_pixel_at(w // 2 + i, h // 2 + j, 1)
 
-        while (True):
-            self.__showDebugInfo()
+        while (self.running):
             self.__step()
             
             # check draw flag
             # store keys
 
+            # screen draw
+            self.__draw_screen()
+            self.__showDebugInfo()
+
             # 60hz sync
             time.sleep(1 / 60)
+
         
 
 
