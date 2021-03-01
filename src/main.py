@@ -27,8 +27,7 @@ class PyChip8:
         self.key = [0] * 16
         self.screen_size = (64, 32)
         self.gfx = [0] * self.screen_size[0] * self.screen_size[1]
-        self.stack = [0] * 16
-        self.sp = 0
+        self.sp = 0x52
         self.keymap = [
             'X', '1', '2', '3', 
             'Q', 'W', 'E', 'A', 
@@ -217,9 +216,24 @@ class PyChip8:
             nn = opcode & 0x00FF
             self.v[x] = random.randint(0, 256) & nn
         
-        # ❌ DXYN Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N+1 pixels. Each row of 8 pixels is read as bit-coded starting from memory location I; I value doesn’t change after the execution of this instruction. As described above, VF is set to 1 if any screen pixels are flipped from set to unset when the sprite is drawn, and to 0 if that doesn’t happen 
-        elif opcode >= 0xD000 and opcode < 0xE000: pass
-        
+        # DXYN Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N+1 pixels. Each row of 8 pixels is read as bit-coded starting from memory location I; I value doesn’t change after the execution of this instruction. As described above, VF is set to 1 if any screen pixels are flipped from set to unset when the sprite is drawn, and to 0 if that doesn’t happen 
+        elif opcode >= 0xD000 and opcode < 0xE000:
+            x = (opcode & 0x0F00) >> 8
+            y = (opcode & 0x00F0) >> 4
+            n = (opcode & 0x000F)
+            w, h = self.screen_size
+            xpos = self.v[x]
+            ypos = self.v[y]
+            
+            self.v[0xF] = 0
+            for yline in range(n):
+                pixel = self.memory[self.i + yline]
+                for xline in range(8):
+                    if (pixel & (0x80 >> xline)) != 0:
+                        if self.gfx[xpos + xline + (ypos + yline) * w] == 1:
+                            self.v[0xF] = 1
+                            self.gfx[xpos + xline + (ypos + yline) * w] ^= 1
+
         # keyop
         elif opcode >= 0xE000 and opcode < 0xF000:
             op = opcode & 0x00FF
@@ -258,17 +272,27 @@ class PyChip8:
             elif op == 0x1E:
                 self.i = (self.i + self.v[x]) % 0xFF
             
-            # ❌ FX29 Sets I to the location of the sprite for the character in VX. Characters 0-F (in hexadecimal) are represented by a 4x5 font. 
-            elif op == 0x29: pass
+            # FX29 Sets I to the location of the sprite for the character in VX. Characters 0-F (in hexadecimal) are represented by a 4x5 font. 
+            elif op == 0x29:
+                self.i = self.v[x] * 5
             
-            # ❌ FX33 Stores the binary-coded decimal representation of VX, with the most significant of three digits at the address in I, the middle digit at I plus 1, and the least significant digit at I plus 2. (In other words, take the decimal representation of VX, place the hundreds digit in memory at location in I, the tens digit at location I+1, and the ones digit at location I+2.) 
-            elif op == 0x33: pass
+            # FX33 Stores the binary-coded decimal representation of VX, with the most significant of three digits at the address in I, the middle digit at I plus 1, and the least significant digit at I plus 2. (In other words, take the decimal representation of VX, place the hundreds digit in memory at location in I, the tens digit at location I+1, and the ones digit at location I+2.) 
+            elif op == 0x33:
+                val = '{:03d}'.format(self.v[x])
+                self.memory[self.i]= int(val[0])
+                self.memory[self.i + 1] = int(val[1])
+                self.memory[self.i + 2] = int(val[2])
             
-            # ❌ FX55 Stores V0 to VX (including VX) in memory starting at address I. The offset from I is increased by 1 for each value written, but I itself is left unmodified.[d]
-            elif op == 0x55: pass
+            # FX55 Stores V0 to VX (including VX) in memory starting at address I. The offset from I is increased by 1 for each value written, but I itself is left unmodified.[d]
+            elif op == 0x55:
+                for i in range(x + 1):
+                    self.memory[self.i + i] = self.v[i]
             
-            # ❌ FX65 Fills V0 to VX (including VX) with values from memory starting at address I. The offset from I is increased by 1 for each value written, but I itself is left unmodified.[d]
-            elif op == 0x07: pass
+            # FX65 Fills V0 to VX (including VX) with values from memory starting at address I. The offset from I is increased by 1 for each value written, but I itself is left unmodified.[d]
+            elif op == 0x07:
+                for i in range(x + 1):
+                    self.v[i] = self.memory[self.i + i]
+
             
             else:
                 decode_err = True
@@ -279,6 +303,12 @@ class PyChip8:
         if decode_err:
             print(f'ERROR DECODING INSTRUCTION: {hex(opcode)}')
             self.running = False
+
+    
+    def __write_to_memory(self, offset, bytes):
+        for i, b in enumerate(bytes):
+            self.memory[offset + i] = b
+
          
     def __step(self):
 
@@ -304,7 +334,6 @@ class PyChip8:
         w, h = self.screen_size
 
         lines = []
-        os.system('clear')
         print('SCREEN:')
         for y in range(h):
             line = []
@@ -319,11 +348,13 @@ class PyChip8:
         self.reset()
         self.running = True
 
-        # load rom_file contents
-        w, h = self.screen_size
-        for i in range(-2, 2):
-            for j in range(-2, 2):
-                self.__set_pixel_at(w // 2 + i, h // 2 + j, 1)
+        # load fonts
+        fonts = open('FONTS.chip8', 'rb').read()
+        self.__write_to_memory(0, fonts)
+
+        # load rom
+        rom = open(rom_file, 'rb').read()
+        self.__write_to_memory(0x200, rom)
 
         while (self.running):
             self.__step()
@@ -332,6 +363,7 @@ class PyChip8:
             # store keys
 
             # screen draw
+            os.system('clear')
             self.__draw_screen()
             self.__showDebugInfo()
 
