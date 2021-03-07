@@ -328,7 +328,8 @@ class PyChip8:
         if self.tdelay > 0: self.tdelay -= 1
         if self.tsound > 0:
             if self.tsound == 1:
-                # beep
+                sys.stdout.write('\a')
+                sys.stdout.flush()
                 pass
             self.tsound -= 1
         
@@ -346,6 +347,7 @@ class PyChip8:
             lines.append(''.join(line))
         print('\n'.join(lines))
 
+
     def run(self, rom_file):
         self.reset()
         self.running = True
@@ -358,15 +360,9 @@ class PyChip8:
         rom = open(rom_file, 'rb').read()
         self.__write_to_memory(0x200, rom)
 
-        d = False
         while (self.running):
             tstart = time.time()
             opcode = self.memory[self.pc] << 8 | self.memory[self.pc + 1]
-            # if d:
-            #     print(f'OPCODE: {hex(opcode)} {opcode}')
-            #     self.__showDebugInfo()
-            #     input()
-            
             self.pc += 2
             self.__step(opcode)
 
@@ -378,13 +374,7 @@ class PyChip8:
                 os.system('clear')
                 self.__draw_screen()
                 self.repaint = False
-                # if not d:
-                #     i = input()
-                #     d = i.lower() == 'y'
             
-            
-
-
             # 60hz sync
             tend = time.time() - tstart
             tframe = (1.0 / STEPS_PER_SECOND) - tend
