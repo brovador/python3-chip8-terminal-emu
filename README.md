@@ -18,7 +18,6 @@ Chip8 emulator written in python3 to be run in a terminal
 ## Next version: 0.2
 
 ### Features
-* Implement keyboard
 * Fix unimplemented opcodes
 
 ## Documentation and references used:
