@@ -246,12 +246,16 @@ class PyChip8:
             op = opcode & 0x00FF
             x = (opcode & 0x0F00) >> 8
 
-            # ❌ Skips the next instruction if the key stored in VX is pressed. (Usually the next instruction is a jump to skip a code block) 
-            if op == 0x9E: pass
+            # EX9E Skips the next instruction if the key stored in VX is pressed. (Usually the next instruction is a jump to skip a code block) 
+            if op == 0x9E:
+                if self.key[self.v[x]]:
+                    self.pc += 2
 
-            # ❌ EXA1 Skips the next instruction if the key stored in VX isn't pressed. (Usually the next instruction is a jump to skip a code block) 
-            elif op == 0xA1: pass
-
+            # EXA1 Skips the next instruction if the key stored in VX isn't pressed. (Usually the next instruction is a jump to skip a code block) 
+            elif op == 0xA1:
+                if not self.key[self.v[x]]:
+                    self.pc += 2
+            
             else:
                 decode_err = True
 
@@ -319,7 +323,7 @@ class PyChip8:
          
     def __step(self, opcode):
         # update input
-        # self.__read_keyboard()
+        self.__read_keyboard()
 
         # decode opcode
         self.__decode_and_execute(opcode)
