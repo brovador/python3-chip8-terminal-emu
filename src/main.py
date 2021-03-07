@@ -74,11 +74,12 @@ class PyChip8:
             for x in range(0, n):
                 self.__set_pixel_at(x, y, 0)
 
-    def __decode_and_execute(self, opcode):
+    def __execute(self, opcode):
 
         decode_err = False
+        op = (opcode & 0xF000) >> 12
 
-        if opcode < 0x1000:
+        if op == 0x0:
             # 00Cn - Scroll n pixels down
             if opcode >= 0x00C0 and opcode < 0x00D0:
                 n = opcode & 0x000F
@@ -118,12 +119,12 @@ class PyChip8:
                 pass
         
         # 1NNN jump to NNN
-        elif opcode >= 0x1000 and opcode < 0x2000:
+        elif op == 0x1:
             nnn = opcode & 0x0FFF
             self.pc = nnn
         
         # 2NNN call subroutine at NNN
-        elif opcode >= 0x2000 and opcode < 0x3000:
+        elif op == 0x2:
             self.memory[self.sp] = self.pc & 0x00FF
             self.sp += 1
             self.memory[self.sp] = (self.pc & 0xFF00) >> 8
@@ -132,37 +133,37 @@ class PyChip8:
             self.pc = nnn
         
         # 3XNN Skips the next instruction if VX equals NN. (Usually the next instruction is a jump to skip a code block) 
-        elif opcode >= 0x3000 and opcode < 0x4000:
+        elif op == 0x3:
             x = (opcode & 0x0F00) >> 8
             nn = opcode & 0x00FF
             self.pc += 2 if self.v[x] == nn else 0
         
         # 4XNN Skips the next instruction if VX doesn't equal NN. (Usually the next instruction is a jump to skip a code block) 
-        elif opcode >= 0x4000 and opcode < 0x5000:
+        elif op == 0x4:
             x = (opcode & 0x0F00) >> 8
             nn = opcode & 0x00FF
             self.pc += 2 if self.v[x] != nn else 0
         
         # 5XY0 Skips the next instruction if VX equals VY. (Usually the next instruction is a jump to skip a code block)
-        elif opcode >= 0x5000 and opcode < 0x6000:
+        elif op == 0x5:
             x = (opcode & 0x0F00) >> 8
             y = (opcode & 0x00F0) >> 4
             self.pc += 2 if self.v[x] == self.v[y] else 0
         
         # 6XNN Sets VX to NN.
-        elif opcode >= 0x6000 and opcode < 0x7000:
+        elif op == 0x6:
             x = (opcode & 0x0F00) >> 8
             nn = opcode & 0x00FF
             self.v[x] = nn
         
         # 7XNN Adds NN to VX. (Carry flag is not changed) 
-        elif opcode >= 0x7000 and opcode < 0x8000:
+        elif op == 0x7:
             x = (opcode & 0x0F00) >> 8
             nn = opcode & 0x00FF
             self.v[x] = (self.v[x] + nn) % 256
         
         # bit ops
-        elif opcode >= 0x8000 and opcode < 0x9000:
+        elif op == 0x8:
             op = opcode & 0x000F
             x = (opcode & 0x0F00) >> 8
             y = (opcode & 0x00F0) >> 4
@@ -200,29 +201,29 @@ class PyChip8:
                 decode_err = True
         
         # 9XY0 Skips the next instruction if VX doesn't equal VY. (Usually the next instruction is a jump to skip a code block) 
-        elif opcode >= 0x9000 and opcode < 0xA000:
+        elif op == 0x9:
             x = (opcode & 0x0F00) >> 8
             y = (opcode & 0x00F0) >> 4
             self.pc += 2 if self.v[x] != self.v[y] else 0
         
         # ANNN Sets I to the address NNN. 
-        elif opcode >= 0xA000 and opcode < 0xB000:
+        elif op == 0xA:
             nnn = opcode & 0x0FFF
             self.i = nnn
         
         # BNNN Jumps to the address NNN plus V0. 
-        elif opcode >= 0xB000 and opcode < 0xC000:
+        elif op == 0xB:
             nnn = opcode & 0x0FFF
             self.pc += self.v[0] + nnn
         
         # CXNN Sets VX to the result of a bitwise and operation on a random number (Typically: 0 to 255) and NN.
-        elif opcode >= 0xC000 and opcode < 0xD000:
+        elif op == 0xC:
             x = (opcode & 0x0F00) >> 8
             nn = opcode & 0x00FF
             self.v[x] = random.randint(0, 256) & nn
         
         # DXYN Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N+1 pixels. Each row of 8 pixels is read as bit-coded starting from memory location I; I value doesn’t change after the execution of this instruction. As described above, VF is set to 1 if any screen pixels are flipped from set to unset when the sprite is drawn, and to 0 if that doesn’t happen 
-        elif opcode >= 0xD000 and opcode < 0xE000:
+        elif op == 0xD:
             x = (opcode & 0x0F00) >> 8
             y = (opcode & 0x00F0) >> 4
             n = (opcode & 0x000F)
@@ -242,7 +243,7 @@ class PyChip8:
             
 
         # keyop
-        elif opcode >= 0xE000 and opcode < 0xF000:
+        elif op == 0xE:
             op = opcode & 0x00FF
             x = (opcode & 0x0F00) >> 8
 
@@ -260,7 +261,7 @@ class PyChip8:
                 decode_err = True
 
         # mix
-        elif opcode >= 0xF000:
+        elif op == 0xF:
             op = opcode & 0x00FF
             x = (opcode & 0x0F00) >> 8
 
@@ -326,7 +327,7 @@ class PyChip8:
         self.__read_keyboard()
 
         # decode opcode
-        self.__decode_and_execute(opcode)
+        self.__execute(opcode)
         
         # update timers
         if self.tdelay > 0: self.tdelay -= 1
@@ -334,7 +335,6 @@ class PyChip8:
             if self.tsound == 1:
                 sys.stdout.write('\a')
                 sys.stdout.flush()
-                pass
             self.tsound -= 1
         
     
@@ -366,15 +366,12 @@ class PyChip8:
 
         while (self.running):
             tstart = time.time()
+            
             opcode = self.memory[self.pc] << 8 | self.memory[self.pc + 1]
             self.pc += 2
             self.__step(opcode)
 
-            # check draw flag
-            # store keys
-
             if self.repaint:
-                # screen draw
                 os.system('clear')
                 self.__draw_screen()
                 self.repaint = False
@@ -383,7 +380,6 @@ class PyChip8:
             tend = time.time() - tstart
             tframe = (1.0 / STEPS_PER_SECOND) - tend
             if tframe > 0:
-                pass
                 time.sleep(tframe)
 
         
