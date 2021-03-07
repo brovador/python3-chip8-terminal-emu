@@ -4,7 +4,7 @@ Chip8 emulator written in python3 to be run in a terminal
 
 ## Current version: 0.1
 
-[Example](http://brovador.github.io/python3-chip8-terminal-emu/demo.png)
+[Example](https://brovador.github.io/python3-chip8-terminal-emu/demo.png)
 
 ### Install and run
 * Install dependencies via ```pip install -r requirements.txt```
