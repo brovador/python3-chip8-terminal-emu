@@ -4,6 +4,8 @@ import time
 import random
 import keyboard
 
+STEPS_PER_SECOND = 60
+
 class PyChip8:
     def __init__(self, debug = False):
         self.reset()
@@ -11,7 +13,7 @@ class PyChip8:
 
     def __showDebugInfo(self):
         if not self.debug: return
-        print(f'PC: {self.pc}, T: {self.tdelay // 60}, K: {[0 if k else 1 for k in self.key]}')
+        print(f'SP: {self.sp}, V: {self.v}, PC: {self.pc}, I: {self.i}, dt: {self.tdelay}')
 
     def __read_keyboard(self):
         for i, k in enumerate(self.keymap):
@@ -21,13 +23,14 @@ class PyChip8:
         self.memory = bytearray(4 * 1024)
         self.v = [0] * 16
         self.i = 0
-        self.pc = 0xFFF
+        self.pc = 0x0200
         self.tdelay = 0
         self.tsound = 0
         self.key = [0] * 16
         self.screen_size = (64, 32)
         self.gfx = [0] * self.screen_size[0] * self.screen_size[1]
         self.sp = 0x52
+        self.repaint = False
         self.keymap = [
             'X', '1', '2', '3', 
             'Q', 'W', 'E', 'A', 
@@ -73,6 +76,8 @@ class PyChip8:
 
     def __decode_and_execute(self, opcode):
 
+        decode_err = False
+
         if opcode < 0x1000:
             # 00Cn - Scroll n pixels down
             if opcode >= 0x00C0 and opcode < 0x00D0:
@@ -81,6 +86,7 @@ class PyChip8:
             
             # 0E00 clear_screen
             elif opcode == 0x00E0:
+                self.repaint = True
                 for i in range(len(self.gfx)):
                     self.gfx[i] = 0
             
@@ -153,7 +159,7 @@ class PyChip8:
         elif opcode >= 0x7000 and opcode < 0x8000:
             x = (opcode & 0x0F00) >> 8
             nn = opcode & 0x00FF
-            self.v[x] = (self.v[x] + nn) % 0xFF
+            self.v[x] = (self.v[x] + nn) % 256
         
         # bit ops
         elif opcode >= 0x8000 and opcode < 0x9000:
@@ -171,26 +177,25 @@ class PyChip8:
             # 8XY4 Adds VY to VX. VF is set to 1 when there's a carry, and to 0 when there isn't. 
             elif op == 4: 
                 res = self.v[x] + self.v[y]
-                self.v[x] = res % 0xFF
-                self.v[0x0F] = 1 if res > 0x0F else 0
+                self.v[x] = res % 256
+                self.v[0x0F] = 1 if res > 0xFF else 0
             # 8XY5 VY is subtracted from VX. VF is set to 0 when there's a borrow, and 1 when there isn't. 
             elif op == 5:
-                res = self.v[x] - self.v[y]
-                self.v[x] = res % 0xFF
-                self.v[0x0F] = 1 if res < 0 else 0
+                self.v[0xF] = 1 if self.v[x] >= self.v[y] else 0
+                self.v[x] = (self.v[x] - self.v[y]) % 256
             # 8XY6 Stores the least significant bit of VX in VF and then shifts VX to the right by 1.[b]
             elif op == 6:
-                self.v[0x0F] = self.v[x] & 0x0001
-                self.v[x] = self.v[x] >> 1
+                self.v[0x0F] = self.v[x] & 0x01
+                self.v[y] = self.v[x] >> 1
             # 8XY7 Sets VX to VY minus VX. VF is set to 0 when there's a borrow, and 1 when there isn't. 
             elif op == 7:
                 res = self.v[y] - self.v[x]
-                self.v[x] = res % 0xFF
+                self.v[x] = res % 256
                 self.v[0x0F] = 0 if res < 0 else 1
             # 8XYE Stores the most significant bit of VX in VF and then shifts VX to the left by 1
             elif op == 0x0E:
-                self.v[0x0F] = (self.v[x] & 0x8000) >> 15
-                self.v[x] = self.v[x] << 1
+                self.v[0x0F] = self.v[x] >> 7
+                self.v[x] <<= 1
             else:
                 decode_err = True
         
@@ -232,7 +237,9 @@ class PyChip8:
                     if (pixel & (0x80 >> xline)) != 0:
                         if self.gfx[xpos + xline + (ypos + yline) * w] == 1:
                             self.v[0xF] = 1
-                            self.gfx[xpos + xline + (ypos + yline) * w] ^= 1
+                        self.gfx[xpos + xline + (ypos + yline) * w] ^= 1
+            self.repaint = True
+            
 
         # keyop
         elif opcode >= 0xE000 and opcode < 0xF000:
@@ -289,7 +296,7 @@ class PyChip8:
                     self.memory[self.i + i] = self.v[i]
             
             # FX65 Fills V0 to VX (including VX) with values from memory starting at address I. The offset from I is increased by 1 for each value written, but I itself is left unmodified.[d]
-            elif op == 0x07:
+            elif op == 0x65:
                 for i in range(x + 1):
                     self.v[i] = self.memory[self.i + i]
 
@@ -310,17 +317,12 @@ class PyChip8:
             self.memory[offset + i] = b
 
          
-    def __step(self):
-
+    def __step(self, opcode):
         # update input
         # self.__read_keyboard()
 
-        # fetch opcode
-        #opcode = self.memory[self.pc] << 8 | self.memory[self.pc + 1]
-        #self.pc += 2
-
         # decode opcode
-        #self.__decode_and_execute(opcode)
+        self.__decode_and_execute(opcode)
         
         # update timers
         if self.tdelay > 0: self.tdelay -= 1
@@ -329,6 +331,7 @@ class PyChip8:
                 # beep
                 pass
             self.tsound -= 1
+        
     
     def __draw_screen(self):
         w, h = self.screen_size
@@ -343,7 +346,6 @@ class PyChip8:
             lines.append(''.join(line))
         print('\n'.join(lines))
 
-
     def run(self, rom_file):
         self.reset()
         self.running = True
@@ -356,19 +358,39 @@ class PyChip8:
         rom = open(rom_file, 'rb').read()
         self.__write_to_memory(0x200, rom)
 
+        d = False
         while (self.running):
-            self.__step()
+            tstart = time.time()
+            opcode = self.memory[self.pc] << 8 | self.memory[self.pc + 1]
+            # if d:
+            #     print(f'OPCODE: {hex(opcode)} {opcode}')
+            #     self.__showDebugInfo()
+            #     input()
             
+            self.pc += 2
+            self.__step(opcode)
+
             # check draw flag
             # store keys
 
-            # screen draw
-            os.system('clear')
-            self.__draw_screen()
-            self.__showDebugInfo()
+            if self.repaint:
+                # screen draw
+                os.system('clear')
+                self.__draw_screen()
+                self.repaint = False
+                # if not d:
+                #     i = input()
+                #     d = i.lower() == 'y'
+            
+            
+
 
             # 60hz sync
-            time.sleep(1 / 60)
+            tend = time.time() - tstart
+            tframe = (1.0 / STEPS_PER_SECOND) - tend
+            if tframe > 0:
+                pass
+                time.sleep(tframe)
 
         
 
